@@ -1,5 +1,5 @@
 import { graphql } from "react-relay";
-import { Environment } from "relay-runtime";
+import { Environment, RecordSourceSelectorProxy } from "relay-runtime";
 
 import {
   commitMutationPromiseNormalized,
@@ -11,15 +11,36 @@ import { RejectCommentMutation as MutationTypes } from "coral-stream/__generated
 
 let clientMutationId = 0;
 
+function decrementCount(store: RecordSourceSelectorProxy, storyID: string) {
+  const storyRecord = store.get(storyID);
+  if (!storyRecord) {
+    return;
+  }
+  const commentCountsRecord = storyRecord.getLinkedRecord("commentCounts");
+  if (!commentCountsRecord) {
+    return;
+  }
+  const tagsRecord = commentCountsRecord.getLinkedRecord("tags");
+  if (tagsRecord) {
+    tagsRecord.setValue(tagsRecord.getValue("FEATURED") - 1, "FEATURED");
+  }
+}
+
 const RejectCommentMutation = createMutation(
   "rejectComment",
-  (environment: Environment, input: MutationInput<MutationTypes>) =>
+  (
+    environment: Environment,
+    input: MutationInput<MutationTypes> & { storyID: string }
+  ) =>
     commitMutationPromiseNormalized<MutationTypes>(environment, {
       mutation: graphql`
         mutation RejectCommentMutation($input: RejectCommentInput!) {
           rejectComment(input: $input) {
             comment {
               status
+              tags {
+                code
+              }
             }
             clientMutationId
           }
@@ -36,12 +57,17 @@ const RejectCommentMutation = createMutation(
       },
       variables: {
         input: {
-          ...input,
+          commentID: input.commentID,
+          commentRevisionID: input.commentRevisionID,
           clientMutationId: (clientMutationId++).toString(),
         },
       },
       updater: store => {
         store.get(input.commentID)!.setValue("REJECT", "lastViewerAction");
+
+        if (input.storyID) {
+          decrementCount(store, input.storyID);
+        }
       },
     })
 );
